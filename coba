@@ -1,0 +1,432 @@
+# Proyek Kompstat: Aplikasi Statistik Nonparametrik
+
+# Load Library
+library(shiny)
+library(shinythemes)
+library(bslib)
+library(readr)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Define UI
+ui <- fluidPage(
+  theme = bs_theme(
+    version = 5,
+    bootswatch = "lux",
+    primary = "#2c3e50",
+    secondary = "#18bc9c",
+    success = "#2ecc71",
+    info = "#3498db",
+    warning = "#f39c12",
+    danger = "#e74c3c",
+    base_font = font_google("Quicksand"),
+    heading_font = font_google("Poppins"),
+    code_font = font_google("Fira Code")
+  ),
+  
+  page_fillable(
+    navset_tab(
+      
+      # Tab Dashboard
+      nav_panel("Dashboard",
+                titlePanel("Selamat Datang di Aplikasi Statistik Nonparametrik"),
+                fluidRow(
+                  column(6,
+                         h4("Tentang Aplikasi:"),
+                         p("Aplikasi ini dirancang untuk memudahkan analisis data statistik nonparametrik serta visualisasi data."),
+                         p("Pengguna dapat mengunggah data sendiri (CSV/Excel), memilih jenis uji statistik, dan langsung melihat hasilnya."),
+                         p("Fitur yang tersedia:"),
+                         tags$ul(
+                           tags$li("Visualisasi Data Interaktif: Histogram, Boxplot, Scatter Plot, Bar Plot, Line Plot"),
+                           tags$li("Berbagai Uji Nonparametrik: Wilcoxon, Mann-Whitney, Kruskal-Wallis, dll")
+                         )
+                  ),
+                  column(6,
+                         img(src = "https://cdn-icons-png.flaticon.com/512/4341/4341139.png", width = "90%", style = "margin-top:20px;")
+                  )
+                )
+      ),
+      
+      # Tab Visualisasi
+      nav_panel("Visualisasi",
+                titlePanel("Visualisasi Data Statistik"),
+                sidebarLayout(
+                  sidebarPanel(
+                    fileInput("data_vis", "Upload Data (CSV atau Excel)", accept = c(".csv", ".xlsx")),
+                    uiOutput("varSelect"),
+                    selectInput("plotType", "Pilih Jenis Plot", 
+                                choices = c("Histogram" = "hist", 
+                                            "Boxplot" = "box", 
+                                            "Scatter Plot" = "scatter", 
+                                            "Bar Plot" = "bar", 
+                                            "Line Plot" = "line")),
+                    actionButton("plotBtn", "Tampilkan Plot", class = "btn btn-success")
+                  ),
+                  mainPanel(
+                    h4("Cuplikan Data"),
+                    tableOutput("preview"),
+                    h4("Hasil Plot"),
+                    plotOutput("plot")
+                  )
+                )
+      ),
+      
+      # Tab Statistik Nonparametrik
+      nav_panel("StatNonpar",
+                titlePanel("Analisis Statistik Non-Parametrik"),
+                sidebarLayout(
+                  sidebarPanel(
+                    fileInput("datanonpar", "Upload File (CSV/Excel)", accept = c(".csv", ".xlsx")),
+                    uiOutput("varSelectUI"),
+                    selectInput("testType", "Pilih Uji",
+                                choices = c("Wilcoxon" = "wilcox",
+                                            "Mann-Whitney" = "mann",
+                                            "Kruskal-Wallis" = "kruskal",
+                                            "Spearman Correlation" = "spearman",
+                                            "Sign Test" = "sign")),
+                    actionButton("runTest", "Jalankan Uji", class = "btn btn-primary")
+                  ),
+                  mainPanel(
+                    tableOutput("dataPreview"),
+                    verbatimTextOutput("testResult")
+                  )
+                )
+      )
+      
+    ), id = "tab"
+  )
+)
+
+# Define Server
+server <- function(input, output, session) {
+  
+  # ---- Visualisasi ----
+  data_Visualisasi <- reactive({
+    req(input$data_vis)
+    ext <- tools::file_ext(input$data_vis$name)
+    if (ext == "csv") {
+      read_csv(input$data_vis$datapath)
+    } else if (ext == "xlsx") {
+      read_excel(input$data_vis$datapath)
+    } else {
+      NULL
+    }
+  })
+  
+  output$preview <- renderTable({
+    req(data_Visualisasi())
+    head(data_Visualisasi(), 10)
+  })
+  
+  output$varSelect <- renderUI({
+    req(data_Visualisasi())
+    df <- data_Visualisasi()
+    tagList(
+      selectInput("xvar", "Pilih Variabel X:", choices = names(df)),
+      selectInput("yvar", "Pilih Variabel Y (jika perlu):", choices = names(df), selected = names(df)[2])
+    )
+  })
+  
+  observeEvent(input$plotBtn, {
+    output$plot <- renderPlot({
+      req(data_Visualisasi())
+      df <- data_Visualisasi()
+      x <- input$xvar
+      y <- input$yvar
+      plotType <- input$plotType
+      
+      if (plotType == "hist") {
+        ggplot(df, aes_string(x = paste0("`", x, "`"))) + 
+          geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+          theme_minimal()
+      } else if (plotType == "box") {
+        ggplot(df, aes(x = !!sym(x), y = !!sym(y))) + 
+          geom_boxplot(fill = "orange") +
+          theme_minimal()
+      } else if (plotType == "scatter") {
+        ggplot(df, aes(x = !!sym(x), y = !!sym(y))) + 
+          geom_point(color = "blue") +
+          theme_minimal()
+      } else if (plotType == "bar") {
+        ggplot(df, aes_string(x = paste0("`", x, "`"))) + 
+          geom_bar(fill = "purple") +
+          theme_minimal()
+      } else if (plotType == "line") {
+        ggplot(df, aes(x = !!sym(x), y = !!sym(y))) + 
+          geom_line(color = "green") +
+          theme_minimal()
+      }
+    })
+  })
+  
+  # ---- Statistik Nonparametrik ----
+  data_StatNonpar <- reactive({
+    req(input$datanonpar)
+    ext <- tools::file_ext(input$datanonpar$name)
+    if (ext == "csv") {
+      read_csv(input$datanonpar$datapath)
+    } else if (ext == "xlsx") {
+      read_excel(input$datanonpar$datapath)
+    } else {
+      NULL
+    }
+  })
+  
+  output$dataPreview <- renderTable({
+    req(data_StatNonpar())
+    head(data_StatNonpar(), 10)
+  })
+  
+  output$varSelectUI <- renderUI({
+    req(data_StatNonpar())
+    df <- data_StatNonpar()
+    tagList(
+      selectInput("Variabel_X", "Kelompok 1:", choices = names(df)),
+      selectInput("Variabel_Y", "Kelompok 2:", choices = names(df))
+    )
+  })
+  
+  observeEvent(input$runTest, {
+    output$testResult <- renderPrint({
+      req(data_StatNonpar())
+      df <- data_StatNonpar()
+      X <- df[[input$Variabel_X]]
+      Y <- df[[input$Variabel_Y]]
+      
+      if (input$testType == "wilcox") {
+        result <- wilcox.test(X, Y, paired = TRUE)
+      } else if (input$testType == "mann") {
+        result <- wilcox.test(X, Y, paired = FALSE)
+      } else if (input$testType == "kruskal") {
+        result <- kruskal.test(X ~ Y)
+      } else if (input$testType == "spearman") {
+        result <- cor.test(X, Y, method = "spearman")
+      } else if (input$testType == "sign") {
+        diff <- X - Y
+        result <- binom.test(sum(diff > 0), length(diff[diff != 0]), p = 0.5)
+      }
+      print(result)
+    })
+  })
+}
+
+# Run App
+shinyApp(ui = ui, server = server)
+# Proyek Kompstat: Aplikasi Statistik Nonparametrik
+
+# Load Library
+library(shiny)
+library(shinythemes)
+library(bslib)
+library(readr)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Define UI
+ui <- fluidPage(
+  theme = bs_theme(
+    version = 5,
+    bootswatch = "lux",
+    primary = "#2c3e50",
+    secondary = "#18bc9c",
+    success = "#2ecc71",
+    info = "#3498db",
+    warning = "#f39c12",
+    danger = "#e74c3c",
+    base_font = font_google("Quicksand"),
+    heading_font = font_google("Poppins"),
+    code_font = font_google("Fira Code")
+  ),
+  
+  page_fillable(
+    navset_tab(
+      
+      # Tab Dashboard
+      nav_panel("Dashboard",
+                titlePanel("Selamat Datang di Aplikasi Statistik Nonparametrik"),
+                fluidRow(
+                  column(6,
+                         h4("Tentang Aplikasi:"),
+                         p("Aplikasi ini dirancang untuk memudahkan analisis data statistik nonparametrik serta visualisasi data."),
+                         p("Pengguna dapat mengunggah data sendiri (CSV/Excel), memilih jenis uji statistik, dan langsung melihat hasilnya."),
+                         p("Fitur yang tersedia:"),
+                         tags$ul(
+                           tags$li("Visualisasi Data Interaktif: Histogram, Boxplot, Scatter Plot, Bar Plot, Line Plot"),
+                           tags$li("Berbagai Uji Nonparametrik: Wilcoxon, Mann-Whitney, Kruskal-Wallis, dll")
+                         )
+                  ),
+                  column(6,
+                         img(src = "https://cdn-icons-png.flaticon.com/512/4341/4341139.png", width = "90%", style = "margin-top:20px;")
+                  )
+                )
+      ),
+      
+      # Tab Visualisasi
+      nav_panel("Visualisasi",
+                titlePanel("Visualisasi Data Statistik"),
+                sidebarLayout(
+                  sidebarPanel(
+                    fileInput("data_vis", "Upload Data (CSV atau Excel)", accept = c(".csv", ".xlsx")),
+                    uiOutput("varSelect"),
+                    selectInput("plotType", "Pilih Jenis Plot", 
+                                choices = c("Histogram" = "hist", 
+                                            "Boxplot" = "box", 
+                                            "Scatter Plot" = "scatter", 
+                                            "Bar Plot" = "bar", 
+                                            "Line Plot" = "line")),
+                    actionButton("plotBtn", "Tampilkan Plot", class = "btn btn-success")
+                  ),
+                  mainPanel(
+                    h4("Cuplikan Data"),
+                    tableOutput("preview"),
+                    h4("Hasil Plot"),
+                    plotOutput("plot")
+                  )
+                )
+      ),
+      
+      # Tab Statistik Nonparametrik
+      nav_panel("StatNonpar",
+                titlePanel("Analisis Statistik Non-Parametrik"),
+                sidebarLayout(
+                  sidebarPanel(
+                    fileInput("datanonpar", "Upload File (CSV/Excel)", accept = c(".csv", ".xlsx")),
+                    uiOutput("varSelectUI"),
+                    selectInput("testType", "Pilih Uji",
+                                choices = c("Wilcoxon" = "wilcox",
+                                            "Mann-Whitney" = "mann",
+                                            "Kruskal-Wallis" = "kruskal",
+                                            "Spearman Correlation" = "spearman",
+                                            "Sign Test" = "sign")),
+                    actionButton("runTest", "Jalankan Uji", class = "btn btn-primary")
+                  ),
+                  mainPanel(
+                    tableOutput("dataPreview"),
+                    verbatimTextOutput("testResult")
+                  )
+                )
+      )
+      
+    ), id = "tab"
+  )
+)
+
+# Define Server
+server <- function(input, output, session) {
+  
+  # ---- Visualisasi ----
+  data_Visualisasi <- reactive({
+    req(input$data_vis)
+    ext <- tools::file_ext(input$data_vis$name)
+    if (ext == "csv") {
+      read_csv(input$data_vis$datapath)
+    } else if (ext == "xlsx") {
+      read_excel(input$data_vis$datapath)
+    } else {
+      NULL
+    }
+  })
+  
+  output$preview <- renderTable({
+    req(data_Visualisasi())
+    head(data_Visualisasi(), 10)
+  })
+  
+  output$varSelect <- renderUI({
+    req(data_Visualisasi())
+    df <- data_Visualisasi()
+    tagList(
+      selectInput("xvar", "Pilih Variabel X:", choices = names(df)),
+      selectInput("yvar", "Pilih Variabel Y (jika perlu):", choices = names(df), selected = names(df)[2])
+    )
+  })
+  
+  observeEvent(input$plotBtn, {
+    output$plot <- renderPlot({
+      req(data_Visualisasi())
+      df <- data_Visualisasi()
+      x <- input$xvar
+      y <- input$yvar
+      plotType <- input$plotType
+      
+      if (plotType == "hist") {
+        ggplot(df, aes_string(x = paste0("`", x, "`"))) + 
+          geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+          theme_minimal()
+      } else if (plotType == "box") {
+        ggplot(df, aes(x = !!sym(x), y = !!sym(y))) + 
+          geom_boxplot(fill = "orange") +
+          theme_minimal()
+      } else if (plotType == "scatter") {
+        ggplot(df, aes(x = !!sym(x), y = !!sym(y))) + 
+          geom_point(color = "blue") +
+          theme_minimal()
+      } else if (plotType == "bar") {
+        ggplot(df, aes_string(x = paste0("`", x, "`"))) + 
+          geom_bar(fill = "purple") +
+          theme_minimal()
+      } else if (plotType == "line") {
+        ggplot(df, aes(x = !!sym(x), y = !!sym(y))) + 
+          geom_line(color = "green") +
+          theme_minimal()
+      }
+    })
+  })
+  
+  # ---- Statistik Nonparametrik ----
+  data_StatNonpar <- reactive({
+    req(input$datanonpar)
+    ext <- tools::file_ext(input$datanonpar$name)
+    if (ext == "csv") {
+      read_csv(input$datanonpar$datapath)
+    } else if (ext == "xlsx") {
+      read_excel(input$datanonpar$datapath)
+    } else {
+      NULL
+    }
+  })
+  
+  output$dataPreview <- renderTable({
+    req(data_StatNonpar())
+    head(data_StatNonpar(), 10)
+  })
+  
+  output$varSelectUI <- renderUI({
+    req(data_StatNonpar())
+    df <- data_StatNonpar()
+    tagList(
+      selectInput("Variabel_X", "Kelompok 1:", choices = names(df)),
+      selectInput("Variabel_Y", "Kelompok 2:", choices = names(df))
+    )
+  })
+  
+  observeEvent(input$runTest, {
+    output$testResult <- renderPrint({
+      req(data_StatNonpar())
+      df <- data_StatNonpar()
+      X <- df[[input$Variabel_X]]
+      Y <- df[[input$Variabel_Y]]
+      
+      if (input$testType == "wilcox") {
+        result <- wilcox.test(X, Y, paired = TRUE)
+      } else if (input$testType == "mann") {
+        result <- wilcox.test(X, Y, paired = FALSE)
+      } else if (input$testType == "kruskal") {
+        result <- kruskal.test(X ~ Y)
+      } else if (input$testType == "spearman") {
+        result <- cor.test(X, Y, method = "spearman")
+      } else if (input$testType == "sign") {
+        diff <- X - Y
+        result <- binom.test(sum(diff > 0), length(diff[diff != 0]), p = 0.5)
+      }
+      print(result)
+    })
+  })
+}
+
+# Run App
+shinyApp(ui = ui, server = server)
